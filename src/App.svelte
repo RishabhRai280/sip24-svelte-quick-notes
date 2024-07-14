@@ -1,72 +1,167 @@
 <script>
+ 
   import { onMount } from 'svelte';
-
-  let pages = [];
-  let currentPageIndex = 0;
-  let title = '';
-  let note = '';
-
+  let currentPageID;
+  let title;
+  let note;
+  let db;
+  let getNoteCalled = false;
+  let titles = [];
   onMount(() => {
-    const savedPages = localStorage.getItem("pages");
-    if (savedPages) {
-      pages = JSON.parse(savedPages);
-      title = pages[currentPageIndex];
-      note = localStorage.getItem(title);
-    } else {
-      addPage();
+    const request = indexedDB.open("notesDatabase", 1);
+    request.onupgradeneeded = (event) => {
+      db = request.result;
+      db.createObjectStore("notes", { keyPath: "id", autoIncrement: true });
     }
-  });
-
+    request.onsuccess = () => {
+      db = request.result;
+      getAllTitles();
+    }
+  })
   function saveNote() {
-    const storedPageName = pages[currentPageIndex];
-    if (storedPageName != title) {
-      localStorage.removeItem(storedPageName);
-      pages[currentPageIndex] = title;
+    const transaction = db.transaction(["notes"], "readwrite");
+    const objectStore = transaction.objectStore("notes");
+    objectStore.put({ id: currentPageID, title: title, content: note }).onsuccess = () => {
+      title = '';
+      note = '';
+      getNote(currentPageID);
+      getAllTitles();
+    };
+  }
+  function getNote(id) {
+    currentPageID = id;
+    const transaction = db.transaction(["notes"], "readonly");
+    const objectStore = transaction.objectStore("notes");
+    objectStore.get(id).onsuccess = (event) => {
+      const item = event.target.result;
+      if (item) {
+        title = item.title;
+        note = item.content;
+      }
+    };
+  }
+  function getAllTitles() {
+    const transaction = db.transaction(["notes"], "readonly");
+    const objectStore = transaction.objectStore("notes");
+    objectStore.getAll().onsuccess = (event) => {
+      titles = event.target.result;
+      if (titles.length === 0) {
+        addPage();
+      }
+      if (!getNoteCalled) {
+        getNote(titles[0].id);
+        currentPageID = titles[0].id;
+        getNoteCalled = true;
+      }
     }
-    localStorage.setItem(title, note);
-    localStorage.setItem("pages", JSON.stringify(pages));
   }
-
   function addPage() {
-    pages.push("New Page");
-    selectPage(pages.length ? pages.length - 1 : 0);
+    let newTitle = "Untitled";
+    const transaction = db.transaction(["notes"], "readwrite");
+    const objectStore = transaction.objectStore("notes");
+    objectStore.add({ title: newTitle, content: "" }).onsuccess = (event) => {
+      const newID = event.target.result;
+      titles.push({ id: newID, title: newTitle });
+      getNote(newID);
+    }
   }
-
-  function selectPage(index) {
-    currentPageIndex = index;
-    title = pages[currentPageIndex];
-    note = localStorage.getItem(title);
+  function deletePage(id) {
+    const transaction = db.transaction(["notes"], "readwrite");
+    const objectStore = transaction.objectStore("notes");
+    if (titles.length == 1) {
+      title = "Untitled";
+      note = "";
+      saveNote();
+    } else {
+      objectStore.delete(id).onsuccess = () => {
+        titles = titles.filter(note => note.id != id);
+        getNote(titles[0].id);
+      }
+    }
   }
 </script>
 
-<aside class="fixed top-0 left-0 z-40 w-60 h-screen">
-<div class="bg-light-gray overflow-y-auto py-5 px-3 h-full border-r border-gray-200">
-  <ul class="space-y-2">
-    {#each pages as page, index}
-    <li>
-        <button on:click={()=>selectPage(index)} class="{index == currentPageIndex ? 'bg-dark-gray' : ''} py-2 px-3 text-gray-900 rounded-lg">{page}</button>
-    </li>
+<main>
+  Hello World
+<aside class="sidebar">
+  <div class="menu">
+    {#each titles as t}
+      <button on:click={()=> getNote(t.id)} class="menu-item">{t.title || "Title"}</button>
     {/each}
-    <li class="text-center"><button on:click={addPage} class="font-medium">+ Add page</button></li>
-  </ul>
-</div>
-</aside>
-
-<main class="p-4 ml-60 h-auto">
-  <div class="grid grid-cols-2 items-center mb-3">
-    <h1 class="text-3xl font-bold" contenteditable bind:textContent={title}></h1>
-    <button class="ml-auto bg-gray-800 text-white px-5 py-2.5 rounded-lg font-medium text-sm mt-3 hover:bg-gray-900" on:click={saveNote}>Save</button>
+    <button on:click={addPage} class="add-page">+ Add Page</button>
   </div>
-  <hr/>
-  <textarea class="mt-3 block w-full bg-gray-50 border border-gray-300 rounded-lg text-gray-900 p-2.5" bind:value={note}></textarea>
+</aside></main>
+
+<main class="content">
+  <div class="toolbar">
+    <h1 bind:textContent={title} class="title" contenteditable>{title || "Title"}</h1>
+    <div>
+      <button on:click={saveNote} class="button">Save</button>
+      <button on:click={() => deletePage(currentPageID)} class="button">Delete</button>
+    </div>
+  </div>
+  <textarea bind:value={note} class="note-area" placeholder="Note"></textarea>
 </main>
 
 <style>
-.bg-light-gray {
-  background: #FBFBFB;
-}
+  .sidebar {
+    background: #2C3E50;
+    color: #ECF0F1;
+    width: 250px;
+    height: 100vh;
+    padding: 20px;
+    box-sizing: border-box;
+    position: fixed;
+    top: 0;
+    left: 0;
+  }
 
-.bg-dark-gray {
-  background: #EFEFEF;
-}
+  .menu {
+    display: flex;
+    flex-direction: column;
+  }
+  .menu-item {
+    background: #34495E;
+    color: white;
+    border: none;
+    padding: 10px;
+    margin-bottom: 5px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .add-page {
+    background: #16A085;
+    color: white;
+    border: none;
+    padding: 10px;
+    cursor: pointer;
+  }
+  .content {
+    margin-left: 250px;
+    padding: 20px;
+  }
+  .title {
+    font-size: 24px;
+    color: #34495E;
+  }
+  .button {
+    background: #3498DB;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    margin-left: 10px;
+    cursor: pointer;
+  }
+  .note-area {
+    width: 100%;
+    height: 70vh;
+    border: 1px solid #BDC3C7;
+    padding: 10px;
+    box-sizing: border-box;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+  }
 </style>
